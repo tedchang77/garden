@@ -190,7 +190,7 @@ devMode:
       # Specify a list of POSIX-style paths or glob patterns that should be excluded from the sync.
       exclude:
 
-      # The sync mode to use for the given paths.
+      # The sync mode to use for the given paths. Allowed options: `one-way`, `one-way-replica`, `two-way`.
       mode: one-way
 
   # Optionally specify the name of a specific container to sync to. If not specified, the first container in the
@@ -401,6 +401,9 @@ tests:
         # A POSIX-style path to copy the artifacts to, relative to the project artifacts directory at
         # `.garden/artifacts`.
         target: .
+
+# The maximum duration (in seconds) to wait for resources to deploy and become healthy.
+timeout: 300
 ```
 
 ## Configuration Keys
@@ -828,7 +831,7 @@ devMode:
 
 [devMode](#devmode) > [sync](#devmodesync) > mode
 
-The sync mode to use for the given paths.
+The sync mode to use for the given paths. Allowed options: `one-way`, `one-way-replica`, `two-way`.
 
 | Type     | Default     | Required |
 | -------- | ----------- | -------- |
@@ -1401,6 +1404,14 @@ tests:
   - artifacts:
       - target: "outputs/foo/"
 ```
+
+### `timeout`
+
+The maximum duration (in seconds) to wait for resources to deploy and become healthy.
+
+| Type     | Default | Required |
+| -------- | ------- | -------- |
+| `number` | `300`   | No       |
 
 
 ## Outputs

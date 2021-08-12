@@ -12,7 +12,6 @@ import { PluginContext } from "../../../plugin-context"
 import { ServiceState, combineStates } from "../../../types/service"
 import { sleep, deepMap } from "../../../util/util"
 import { KubeApi } from "../api"
-import { KUBECTL_DEFAULT_TIMEOUT } from "../kubectl"
 import { getAppNamespace } from "../namespace"
 import Bluebird from "bluebird"
 import { KubernetesResource, KubernetesServerResource, BaseResource } from "../types"
@@ -32,6 +31,7 @@ import { getPods, hashManifest } from "../util"
 import { checkWorkloadStatus } from "./workload"
 import { checkWorkloadPodStatus } from "./pod"
 import { gardenAnnotationKey, stableStringify } from "../../../util/string"
+import { KUBECTL_DEFAULT_TIMEOUT } from "../kubectl"
 
 export interface ResourceStatus<T = BaseResource> {
   state: ServiceState
@@ -167,7 +167,7 @@ interface WaitParams {
   serviceName?: string
   resources: KubernetesResource[]
   log: LogEntry
-  timeoutSec?: number
+  timeoutSec: number
 }
 
 /**

@@ -348,6 +348,7 @@ async function runKaniko({
   }
 
   const kanikoImage = provider.config.kaniko?.image || DEFAULT_KANIKO_IMAGE
+  const kanikoTolerations = [...(provider.config.kaniko?.tolerations || []), builderToleration]
   const utilHostname = `${utilDeploymentName}.${utilNamespace}.svc.cluster.local`
   const sourceUrl = `rsync://${utilHostname}:${utilRsyncPort}/volume/${ctx.workingCopyId}/${module.name}/`
 
@@ -420,15 +421,21 @@ async function runKaniko({
           limits: {
             cpu: millicpuToString(provider.config.resources.builder.limits.cpu),
             memory: megabytesToString(provider.config.resources.builder.limits.memory),
+            ...(provider.config.resources.builder.limits.ephemeralStorage
+              ? { "ephemeral-storage": megabytesToString(provider.config.resources.builder.limits.ephemeralStorage) }
+              : {}),
           },
           requests: {
             cpu: millicpuToString(provider.config.resources.builder.requests.cpu),
             memory: megabytesToString(provider.config.resources.builder.requests.memory),
+            ...(provider.config.resources.builder.requests.ephemeralStorage
+              ? { "ephemeral-storage": megabytesToString(provider.config.resources.builder.requests.ephemeralStorage) }
+              : {}),
           },
         },
       },
     ],
-    tolerations: [builderToleration],
+    tolerations: kanikoTolerations,
   }
 
   if (provider.config.deploymentRegistry?.hostname === inClusterRegistryHostname) {
@@ -511,6 +518,7 @@ async function runKaniko({
 }
 
 export function getUtilManifests(provider: KubernetesProvider, authSecretName: string) {
+  const kanikoTolerations = [...(provider.config.kaniko?.tolerations || []), builderToleration]
   const deployment: KubernetesDeployment = {
     apiVersion: "apps/v1",
     kind: "Deployment",
@@ -553,7 +561,7 @@ export function getUtilManifests(provider: KubernetesProvider, authSecretName: s
               emptyDir: {},
             },
           ],
-          tolerations: [builderToleration],
+          tolerations: kanikoTolerations,
         },
       },
     },

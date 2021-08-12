@@ -27,7 +27,7 @@ import { configureDevMode, startDevModeSync } from "../dev-mode"
 import { HelmService } from "../helm/config"
 import { configureHotReload, getHotReloadContainerName, getHotReloadSpec } from "../hot-reload/helpers"
 import { HotReloadableResource, hotReloadK8s } from "../hot-reload/hot-reload"
-import { apply, deleteObjectsBySelector } from "../kubectl"
+import { apply, deleteObjectsBySelector, KUBECTL_DEFAULT_TIMEOUT } from "../kubectl"
 import { streamK8sLogs } from "../logs"
 import { getModuleNamespace, getModuleNamespaceStatus } from "../namespace"
 import { getForwardablePorts, getPortForwardHandler, killPortForwards } from "../port-forward"
@@ -106,7 +106,6 @@ export async function getKubernetesServiceStatus({
       ctx,
       log,
       module,
-      baseModule: undefined,
       manifests: remoteResources,
       resourceSpec: serviceResourceSpec,
     })
@@ -168,6 +167,7 @@ export async function deployKubernetesService(
       serviceName: service.name,
       resources: namespaceManifests,
       log,
+      timeoutSec: service.spec.timeout || KUBECTL_DEFAULT_TIMEOUT,
     })
   }
 
@@ -195,6 +195,7 @@ export async function deployKubernetesService(
       serviceName: service.name,
       resources: prepareResult.manifests,
       log,
+      timeoutSec: service.spec.timeout || KUBECTL_DEFAULT_TIMEOUT,
     })
   }
 
@@ -344,19 +345,19 @@ async function prepareManifestsForSync({
   let target: KubernetesResource<V1Deployment | V1DaemonSet | V1StatefulSet>
 
   try {
+    const resourceSpec = getServiceResourceSpec(module, undefined)
     target = cloneDeep(
       await findServiceResource({
         ctx,
         log,
         module,
-        baseModule: undefined,
         manifests,
-        resourceSpec: service.spec.serviceResource,
+        resourceSpec,
       })
     )
   } catch (err) {
-    // This is only an error if we're actually trying to hot reload.
-    if (devMode || hotReload) {
+    // This is only an error if we're actually trying to hot reload or start dev mode.
+    if ((devMode && service.spec.devMode) || hotReload) {
       throw err
     } else {
       // Nothing to do, so we return the original manifests
