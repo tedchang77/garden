@@ -19,6 +19,7 @@ import { add, sub, isAfter } from "date-fns"
 import { isObject } from "lodash"
 import { deline } from "../util/string"
 import chalk from "chalk"
+import { getPackageVersion } from "../util/util"
 
 // If a GARDEN_AUTH_TOKEN is present and Garden is NOT running from a workflow runner pod,
 // switch to ci-token authentication method.
@@ -336,6 +337,7 @@ export class EnterpriseApi {
     const requestObj = {
       method,
       headers: {
+        "x-core-version": getPackageVersion(),
         ...headers,
         ...makeAuthHeader(token || ""),
       },
