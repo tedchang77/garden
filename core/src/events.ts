@@ -258,6 +258,34 @@ export interface Events extends LoggerEvents {
     index: number
     durationMsec: number
   }
+
+  // Cloud UI events
+  buildRequested: {
+    moduleName: string
+    force: boolean
+  }
+  deployRequested: {
+    serviceName: string
+    devMode: boolean
+    hotReload: boolean
+    force: boolean
+    forceBuild: boolean
+  }
+  testRequested: {
+    moduleName: string
+    force: boolean
+    forceBuild: boolean
+    testNames?: string[] // If not provided, run all tests for the module
+  }
+  updateBuildOnWatchModules: {
+    moduleNames: string[] // ["*"] means all modules
+  }
+  updateDeployOnWatchServices: {
+    serviceNames: string[] // ["*"] means all services
+  }
+  updateTestOnWatchModules: {
+    moduleNames: string[] // ["*"] means all modules
+  }
 }
 
 export type EventName = keyof Events
@@ -298,4 +326,10 @@ export const pipedEventNames: EventName[] = [
   "workflowStepError",
   "workflowStepProcessing",
   "workflowStepSkipped",
+  "buildRequested",
+  "deployRequested",
+  "testRequested",
+  "updateBuildOnWatchModules",
+  "updateDeployOnWatchServices",
+  "updateTestOnWatchModules",
 ]

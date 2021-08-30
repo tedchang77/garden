@@ -8,19 +8,26 @@
 
 import Bluebird from "bluebird"
 import chalk from "chalk"
-import { keyBy, flatten } from "lodash"
+import { keyBy, flatten, without, uniq } from "lodash"
 
 import { GardenModule } from "./types/module"
 import { BaseTask } from "./tasks/base"
 import { GraphResults } from "./task-graph"
 import { isModuleLinked } from "./util/ext-source-util"
 import { Garden } from "./garden"
-import { LogEntry } from "./logger/log-entry"
+import { EmojiName, LogEntry } from "./logger/log-entry"
 import { ConfigGraph } from "./config-graph"
-import { dedent } from "./util/string"
+import { dedent, naturalList } from "./util/string"
 import { ConfigurationError } from "./exceptions"
 import { uniqByName } from "./util/util"
 import { printEmoji, renderDivider } from "./logger/util"
+import { CommandTaskSettings } from "./commands/base"
+import { Events } from "./events"
+import { BuildTask } from "./tasks/build"
+import { DeployTask } from "./tasks/deploy"
+import { filterTestConfigs, TestTask } from "./tasks/test"
+import { testFromConfig } from "./types/test"
+import { applyTaskSettings } from "./commands/dev"
 
 export type ProcessHandler = (graph: ConfigGraph, module: GardenModule) => Promise<BaseTask[]>
 
@@ -33,6 +40,7 @@ interface ProcessParams {
   initialTasks: BaseTask[]
   // use this if the behavior should be different on watcher changes than on initial processing
   changeHandler: ProcessHandler
+  taskSettings?: CommandTaskSettings
 }
 
 export interface ProcessModulesParams extends ProcessParams {
@@ -53,6 +61,7 @@ export async function processModules({
   initialTasks,
   watch,
   changeHandler,
+  taskSettings,
 }: ProcessModulesParams): Promise<ProcessResults> {
   log.silly("Starting processModules")
 
@@ -187,6 +196,100 @@ export async function processModules({
       await garden.processTasks(moduleTasks)
     })
 
+    if (taskSettings) {
+      // Handle Cloud events
+      const params = {
+        garden,
+        graph,
+        log,
+      }
+      garden.events.on("buildRequested", async (event: Events["buildRequested"]) => {
+        graph = await garden.getConfigGraph(log)
+        log.info("")
+        log.info({ emoji: "hammer", msg: chalk.yellow(`Build requested for ${chalk.white(event.moduleName)}`) })
+        const tasks = await cloudEventHandlers.buildRequested({ ...params, request: event })
+        await garden.processTasks(tasks)
+      })
+      garden.events.on("deployRequested", async (event: Events["deployRequested"]) => {
+        graph = await garden.getConfigGraph(log)
+        let prefix: string
+        let emoji: EmojiName
+        if (event.hotReload) {
+          emoji = "fire"
+          prefix = `Hot reload-enabled deployment`
+        } else {
+          if (event.devMode) {
+            emoji = "zap"
+            prefix = `Dev-mode deployment`
+          } else {
+            emoji = "rocket"
+            prefix = "Deployment"
+          }
+        }
+        const msg = `${prefix} requested for ${chalk.white(event.serviceName)}`
+        log.info("")
+        log.info({ emoji, msg: chalk.yellow(msg) })
+        const deployTask = await cloudEventHandlers.deployRequested({ ...params, request: event, taskSettings })
+        await garden.processTasks([deployTask])
+      })
+      garden.events.on("testRequested", async (event: Events["testRequested"]) => {
+        graph = await garden.getConfigGraph(log)
+        const testNames = event.testNames
+        let suffix = ""
+        if (testNames) {
+          suffix = ` (only ${chalk.white(naturalList(testNames))})`
+        }
+        const msg = chalk.yellow(`Tests requested for ${chalk.white(event.moduleName)}${suffix}`)
+        log.info("")
+        log.info({ emoji: "thermometer", msg })
+        const testTasks = await cloudEventHandlers.testRequested({ ...params, request: event, taskSettings })
+        await garden.processTasks(testTasks)
+      })
+      garden.events.on("updateBuildOnWatchModules", (event: Events["updateBuildOnWatchModules"]) => {
+        const moduleNames = event.moduleNames
+        cloudEventHandlers.updateBuildOnWatchModules(moduleNames, taskSettings)
+        let msg
+        if (moduleNames.length === 0) {
+          msg = `Not rebuilding when sources change unless required by deploys or tests`
+        } else {
+          msg = `Now rebuilding ${chalk.white(naturalList(moduleNames))} when sources change`
+        }
+        log.info("")
+        log.info({ emoji: "recycle", msg: chalk.yellow(msg) })
+      })
+      garden.events.on("updateDeployOnWatchServices", (event: Events["updateDeployOnWatchServices"]) => {
+        const serviceNames = event.serviceNames
+        cloudEventHandlers.updateDeployOnWatchServices(serviceNames, taskSettings)
+        let msg
+        if (serviceNames.length === 0) {
+          msg = `Not redeploying on watch unless required by tests`
+        } else {
+          msg = `Now redeploying ${chalk.white(naturalList(serviceNames))} when sources change`
+        }
+        log.info("")
+        log.info({ emoji: "recycle", msg: chalk.yellow(msg) })
+      })
+      garden.events.on("updateTestOnWatchModules", (event: Events["updateTestOnWatchModules"]) => {
+        const moduleNames = event.moduleNames
+        cloudEventHandlers.updateTestOnWatchModules(moduleNames, taskSettings)
+        let msg
+        if (moduleNames.length === 0) {
+          msg = `Not running tests when sources change`
+        } else {
+          msg = `Now running tests for ${chalk.white(naturalList(moduleNames))} when sources change`
+        }
+        log.info("")
+        log.info({ emoji: "recycle", msg: chalk.yellow(msg) })
+      })
+      // deployOnWatch(serviceName[])
+      // testOnWatch(serviceName[])
+      // buildOnWatch(serviceName[])
+      // buildModule(moduleName)
+      // deployService(serviceName)
+      // testModule(moduleName, testName | null)
+      // runTask(taskName)
+    }
+
     waiting()
   })
 
@@ -194,6 +297,107 @@ export async function processModules({
     taskResults: {}, // TODO: Return latest results for each task key processed between restarts?
     restartRequired,
   }
+}
+
+interface CloudEventHandlerCommonParams {
+  garden: Garden
+  graph: ConfigGraph
+  log: LogEntry
+}
+
+export const cloudEventHandlers = {
+  buildRequested: async (params: CloudEventHandlerCommonParams & { request: Events["buildRequested"] }) => {
+    const { garden, graph, log } = params
+    const { moduleName, force } = params.request
+    const tasks = await BuildTask.factory({
+      garden,
+      log,
+      graph,
+      module: graph.getModule(moduleName),
+      force,
+    })
+    return tasks
+  },
+  testRequested: async (
+    params: CloudEventHandlerCommonParams & { request: Events["testRequested"]; taskSettings: CommandTaskSettings }
+  ) => {
+    const { garden, graph, log, taskSettings } = params
+    const { moduleName, testNames, force, forceBuild } = params.request
+    const module = graph.getModule(moduleName)
+    return filterTestConfigs(module.testConfigs, testNames).map((config) => {
+      return new TestTask({
+        garden,
+        graph,
+        log,
+        force,
+        forceBuild,
+        test: testFromConfig(module, config, graph),
+        devModeServiceNames: taskSettings.devModeServiceNames,
+        hotReloadServiceNames: taskSettings.hotReloadServiceNames,
+      })
+    })
+  },
+  deployRequested: async (
+    params: CloudEventHandlerCommonParams & { request: Events["deployRequested"]; taskSettings: CommandTaskSettings }
+  ) => {
+    const { garden, graph, log, taskSettings } = params
+    const { serviceName, devMode, hotReload, force, forceBuild } = params.request
+    const allServiceNames = graph.getServices().map((s) => s.name)
+
+    taskSettings.devModeServiceNames = devMode
+      ? addToTaskSettingsList(serviceName, taskSettings.devModeServiceNames)
+      : removeFromTaskSettingsList(serviceName, taskSettings.devModeServiceNames, allServiceNames)
+
+    if (!devMode) {
+      taskSettings.hotReloadServiceNames = hotReload
+        ? addToTaskSettingsList(serviceName, taskSettings.hotReloadServiceNames)
+        : removeFromTaskSettingsList(serviceName, taskSettings.hotReloadServiceNames, allServiceNames)
+    }
+
+    const { hotReloadServiceNames, devModeServiceNames } = applyTaskSettings(graph, taskSettings)
+
+    const deployTask = new DeployTask({
+      garden,
+      log,
+      graph,
+      service: graph.getService(serviceName),
+      force,
+      forceBuild,
+      fromWatch: true,
+      hotReloadServiceNames,
+      devModeServiceNames,
+    })
+    return deployTask
+  },
+  updateBuildOnWatchModules: (
+    moduleNames: Events["updateBuildOnWatchModules"]["moduleNames"],
+    taskSettings: CommandTaskSettings
+  ) => {
+    taskSettings.buildModuleNames = moduleNames
+    return taskSettings
+  },
+  updateDeployOnWatchServices: (
+    serviceNames: Events["updateDeployOnWatchServices"]["serviceNames"],
+    taskSettings: CommandTaskSettings
+  ) => {
+    taskSettings.deployServiceNames = serviceNames
+    return taskSettings
+  },
+  updateTestOnWatchModules: (
+    moduleNames: Events["updateTestOnWatchModules"]["moduleNames"],
+    taskSettings: CommandTaskSettings
+  ) => {
+    taskSettings.testModuleNames = moduleNames
+    return taskSettings
+  },
+}
+
+function addToTaskSettingsList(name: string, currentList: string[]): string[] {
+  return currentList[0] === "*" ? currentList : uniq([...currentList, name])
+}
+
+function removeFromTaskSettingsList(name: string, currentList: string[], fullList: string[]): string[] {
+  return currentList[0] === "*" ? without(fullList, name) : without(currentList, name)
 }
 
 /**

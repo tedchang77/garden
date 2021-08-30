@@ -20,6 +20,7 @@ import {
 import { makeTestGardenA, withDefaultGlobalOpts, TestGarden } from "../../../helpers"
 import { GlobalOptions, ParameterValues } from "../../../../src/cli/params"
 import { BaseTask } from "../../../../src/tasks/base"
+import { prepareTaskSettings } from "../../../../src/commands/base"
 
 describe("DevCommand", () => {
   const command = new DevCommand()
@@ -35,7 +36,7 @@ describe("DevCommand", () => {
   ) {
     const log = garden.log
 
-    await command.prepare({ log, footerLog: log, headerLog: log, args, opts })
+    const { taskSettings } = await command.prepare({ log, footerLog: log, headerLog: log, args, opts })
 
     const promise = command
       .action({
@@ -45,6 +46,7 @@ describe("DevCommand", () => {
         footerLog: log,
         args,
         opts,
+        taskSettings,
       })
       .then(({ errors }) => {
         if (errors) {
@@ -120,20 +122,21 @@ describe("DevCommand", () => {
     const garden = await makeTestGardenA()
     const log = garden.log
     const graph = await garden.getConfigGraph(log)
-    const modules = graph.getModules()
+
+    const taskSettings = prepareTaskSettings({
+      deployServiceNames: ["*"],
+      testModuleNames: ["*"],
+      // Note: service-a is a runtime dependency of module-a's integration test spec, so in this test case
+      // we're implicitly verifying that tests with runtime dependencies on services being deployed with
+      // hot reloading don't request non-hot-reload-enabled deploys for those same services.
+      hotReloadServiceNames: ["service-a"],
+    })
 
     const initialTasks = await getDevCommandInitialTasks({
       garden,
       log,
       graph,
-      modules,
-      services: graph.getServices(),
-      devModeServiceNames: [],
-      // Note: service-a is a runtime dependency of module-a's integration test spec, so in this test case
-      // we're implicitly verifying that tests with runtime dependencies on services being deployed with
-      // hot reloading don't request non-hot-reload-enabled deploys for those same services.
-      hotReloadServiceNames: ["service-a"],
-      skipTests: false,
+      taskSettings,
     })
 
     const withDeps = async (task: BaseTask) => {
@@ -284,16 +287,18 @@ describe("getDevCommandWatchTasks", () => {
     const log = garden.log
     const graph = await garden.getConfigGraph(log)
 
+    const taskSettings = prepareTaskSettings({
+      deployServiceNames: ["*"],
+      devModeServiceNames: [],
+      testModuleNames: ["*"],
+    })
+
     const watchTasks = await getDevCommandWatchTasks({
       garden,
       log,
       updatedGraph: graph,
       module: graph.getModule("module-b"),
-      servicesWatched: graph.getServices().map((s) => s.name),
-      devModeServiceNames: [],
-      hotReloadServiceNames: [],
-      testNames: undefined,
-      skipTests: false,
+      taskSettings,
     })
 
     const results = await garden.processTasks(watchTasks)

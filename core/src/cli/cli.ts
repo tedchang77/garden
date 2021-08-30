@@ -226,7 +226,7 @@ ${renderCommands(commands)}
     let result: CommandResult<any> = {}
     let analytics: AnalyticsHandler
 
-    const { persistent } = await command.prepare({
+    const { persistent, taskSettings } = await command.prepare({
       log,
       headerLog,
       footerLog,
@@ -313,6 +313,7 @@ ${renderCommands(commands)}
           result = await command.action({
             garden,
             log,
+            taskSettings,
             footerLog,
             headerLog,
             args: parsedArgs,

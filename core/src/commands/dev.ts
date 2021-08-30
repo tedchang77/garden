@@ -11,18 +11,26 @@ import deline = require("deline")
 import dedent = require("dedent")
 import chalk from "chalk"
 import { readFile } from "fs-extra"
-import { flatten } from "lodash"
+import { flatten, isEmpty } from "lodash"
 import moment = require("moment")
 import { join } from "path"
 
 import { getModuleWatchTasks } from "../tasks/helpers"
-import { Command, CommandResult, CommandParams, handleProcessResults, PrepareParams } from "./base"
+import {
+  Command,
+  CommandResult,
+  CommandParams,
+  handleProcessResults,
+  PrepareParams,
+  CommandTaskSettings,
+  prepareTaskSettings,
+} from "./base"
 import { STATIC_DIR } from "../constants"
 import { processModules } from "../process"
 import { GardenModule } from "../types/module"
 import { getTestTasks } from "../tasks/test"
 import { ConfigGraph } from "../config-graph"
-import { emitStackGraphEvent, getHotReloadServiceNames, validateHotReloadServiceNames } from "./helpers"
+import { emitStackGraphEvent, getDevModeServiceNames, getHotReloadServiceNames, validateHotReloadServiceNames } from "./helpers"
 import { startServer } from "../server/server"
 import { BuildTask } from "../tasks/build"
 import { DeployTask } from "../tasks/deploy"
@@ -30,7 +38,6 @@ import { Garden } from "../garden"
 import { LogEntry } from "../logger/log-entry"
 import { StringsParameter, BooleanParameter } from "../cli/params"
 import { printHeader } from "../logger/util"
-import { GardenService } from "../types/service"
 
 const ansiBannerPath = join(STATIC_DIR, "garden-banner-2.txt")
 
@@ -98,7 +105,7 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
     printHeader(headerLog, "Dev", "keyboard")
   }
 
-  async prepare({ log, footerLog }: PrepareParams<DevCommandArgs, DevCommandOpts>) {
+  async prepare({ log, footerLog, args, opts }: PrepareParams<DevCommandArgs, DevCommandOpts>) {
     // print ANSI banner image
     if (chalk.supportsColor && chalk.supportsColor.level > 2) {
       const data = await readFile(ansiBannerPath)
@@ -109,8 +116,15 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
     log.info("")
 
     this.server = await startServer({ log: footerLog })
+    const taskSettings = prepareTaskSettings({
+      deployServiceNames: args.services || ["*"],
+      testModuleNames: opts["skip-tests"] ? [] : ["*"],
+      testConfigNames: opts["test-names"] || ["*"],
+      devModeServiceNames: args.services || ["*"],
+      hotReloadServiceNames: opts["hot-reload"] || [],
+    })
 
-    return { persistent: true }
+    return { persistent: true, taskSettings }
   }
 
   terminate() {
@@ -122,11 +136,12 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
     isWorkflowStepCommand,
     log,
     footerLog,
-    args,
-    opts,
+    taskSettings,
   }: CommandParams<DevCommandArgs, DevCommandOpts>): Promise<CommandResult> {
     this.garden = garden
     this.server?.setGarden(garden)
+
+    const settings = <CommandTaskSettings>taskSettings
 
     const graph = await garden.getConfigGraph(log)
     if (!isWorkflowStepCommand) {
@@ -134,7 +149,7 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
     }
     const modules = graph.getModules()
 
-    const skipTests = opts["skip-tests"]
+    // const skipTests = opts["skip-tests"]
 
     if (modules.length === 0) {
       footerLog && footerLog.setState({ msg: "" })
@@ -143,33 +158,65 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
       return {}
     }
 
-    const hotReloadServiceNames = await getHotReloadServiceNames(opts["hot-reload"], graph)
+    // console.log(`DevCommand: start of action, taskSettings = ${JSON.stringify(taskSettings, null, 2)}`)
+
+    const hotReloadServiceNames = getHotReloadServiceNames(taskSettings!.hotReloadServiceNames, graph)
     if (hotReloadServiceNames.length > 0) {
-      const errMsg = await validateHotReloadServiceNames(hotReloadServiceNames, graph)
+      const errMsg = validateHotReloadServiceNames(hotReloadServiceNames, graph)
       if (errMsg) {
         log.error({ msg: errMsg })
         return { result: {} }
       }
     }
 
-    const services = graph.getServices({ names: args.services })
+    // const hotReloadServiceNames = getHotReloadServiceNames(taskSettings!.hotReloadServiceNames, graph)
+    // // const hotReloadServiceNames = getHotReloadServiceNames(opts["hot-reload"], graph)
+    // if (hotReloadServiceNames.length > 0) {
+    //   const errMsg = validateHotReloadServiceNames(hotReloadServiceNames, graph)
+    //   if (errMsg) {
+    //     log.error({ msg: errMsg })
+    //     return { result: {} }
+    //   }
+    // }
 
-    const devModeServiceNames = services
-      .map((s) => s.name)
-      // Since dev mode is implicit when using this command, we consider explicitly enabling hot reloading to
-      // take precedence over dev mode.
-      .filter((name) => !hotReloadServiceNames.includes(name))
+    // const services = graph.getServices({ names: taskSettings?.deployServiceNames })
+    // // const services = graph.getServices({ names: args.services })
+
+    // const devModeServiceNames = services
+    //   .map((s) => s.name)
+    //   // Since dev mode is implicit when using this command, we consider explicitly enabling hot reloading to
+    //   // take precedence over dev mode.
+    //   .filter((name) => !hotReloadServiceNames.includes(name))
 
     const initialTasks = await getDevCommandInitialTasks({
       garden,
       log,
       graph,
-      modules,
-      services,
-      devModeServiceNames,
-      hotReloadServiceNames,
-      skipTests,
+      taskSettings: settings,
+      // services,
+      // devModeServiceNames,
+      // hotReloadServiceNames,
+      // skipTests,
     })
+
+    setInterval(() => {
+      // log.info(`taskSettings: ${JSON.stringify(settings, null, 2)}`)
+      // garden.events.emit("deployRequested", {
+      //   serviceName: "vote",
+      //   force: true,
+      //   forceBuild: false,
+      //   devMode: true,
+      //   hotReload: false,
+      // })
+
+      // garden.events.emit("buildRequested", { moduleName: "api", force: true })
+
+      // garden.events.emit("updateBuildOnWatchModules", { moduleNames: ["api", "result"] })
+      // garden.events.emit("updateTestOnWatchModules", { moduleNames: ["api", "vote", "result"] })
+      // garden.events.emit("updateDeployOnWatchServices", { serviceNames: ["api"] })
+      // garden.events.emit("updateTestOnWatchModules", { moduleNames: ["api"] })
+      // garden.events.emit("updateDeployOnWatchServices", { serviceNames: [] })
+    }, 5000)
 
     const results = await processModules({
       garden,
@@ -179,17 +226,19 @@ export class DevCommand extends Command<DevCommandArgs, DevCommandOpts> {
       modules,
       watch: true,
       initialTasks,
+      taskSettings: settings,
       changeHandler: async (updatedGraph: ConfigGraph, module: GardenModule) => {
         return getDevCommandWatchTasks({
           garden,
           log,
           updatedGraph,
           module,
-          servicesWatched: devModeServiceNames,
-          devModeServiceNames,
-          hotReloadServiceNames,
-          testNames: opts["test-names"],
-          skipTests,
+          taskSettings: settings,
+          // servicesWatched: devModeServiceNames,
+          // devModeServiceNames,
+          // hotReloadServiceNames,
+          // testNames: opts["test-names"],
+          // skipTests,
         })
       },
     })
@@ -202,21 +251,19 @@ export async function getDevCommandInitialTasks({
   garden,
   log,
   graph,
-  modules,
-  services,
-  devModeServiceNames,
-  hotReloadServiceNames,
-  skipTests,
+  taskSettings,
 }: {
   garden: Garden
   log: LogEntry
   graph: ConfigGraph
-  modules: GardenModule[]
-  services: GardenService[]
-  devModeServiceNames: string[]
-  hotReloadServiceNames: string[]
-  skipTests: boolean
+  taskSettings: CommandTaskSettings
 }) {
+  const { servicesToDeploy, hotReloadServiceNames, devModeServiceNames, testNames } = applyTaskSettings(
+    graph,
+    taskSettings
+  )
+  const modules = graph.getModules()
+
   const moduleTasks = flatten(
     await Bluebird.map(modules, async (module) => {
       // Build the module (in case there are no tests, tasks or services here that need to be run)
@@ -229,24 +276,25 @@ export async function getDevCommandInitialTasks({
       })
 
       // Run all tests in module
-      const testTasks = skipTests
-        ? []
-        : await getTestTasks({
+      const testTasks = moduleShouldBeTested(taskSettings, module)
+        ? await getTestTasks({
             garden,
             graph,
             log,
             module,
             devModeServiceNames,
             hotReloadServiceNames,
+            filterNames: testNames,
             force: false,
             forceBuild: false,
           })
+        : []
 
       return [...buildTasks, ...testTasks]
     })
   )
 
-  const serviceTasks = services
+  const serviceTasks = servicesToDeploy
     .filter((s) => !s.disabled)
     .map(
       (service) =>
@@ -271,52 +319,77 @@ export async function getDevCommandWatchTasks({
   log,
   updatedGraph,
   module,
-  servicesWatched,
-  devModeServiceNames,
-  hotReloadServiceNames,
-  testNames,
-  skipTests,
+  taskSettings,
 }: {
   garden: Garden
   log: LogEntry
   updatedGraph: ConfigGraph
   module: GardenModule
-  servicesWatched: string[]
-  devModeServiceNames: string[]
-  hotReloadServiceNames: string[]
-  testNames: string[] | undefined
-  skipTests: boolean
+  taskSettings: CommandTaskSettings
 }) {
+  const { servicesToDeploy, hotReloadServiceNames, devModeServiceNames, testNames } = applyTaskSettings(
+    updatedGraph,
+    taskSettings
+  )
+  // console.log(`taskSettings: ${JSON.stringify(taskSettings, null, 2)}`)
+  // console.log(`devModeServiceNames: ${devModeServiceNames}`)
+  // console.log(`servicesToDeploy: ${servicesToDeploy.map((s) => s.name)}`)
   const tasks = await getModuleWatchTasks({
     garden,
     log,
     graph: updatedGraph,
     module,
-    servicesWatched,
+    servicesWatched: servicesToDeploy.map((s) => s.name),
     devModeServiceNames,
     hotReloadServiceNames,
   })
 
-  if (!skipTests) {
-    const testModules: GardenModule[] = await updatedGraph.withDependantModules([module])
-    tasks.push(
-      ...flatten(
-        await Bluebird.map(testModules, (m) =>
-          getTestTasks({
-            garden,
-            log,
-            module: m,
-            graph: updatedGraph,
-            filterNames: testNames,
-            devModeServiceNames,
-            hotReloadServiceNames,
-          })
-        )
+  const testModules: GardenModule[] = updatedGraph.withDependantModules([module])
+  tasks.push(
+    ...flatten(
+      await Bluebird.map(testModules, (m) =>
+        moduleShouldBeTested(taskSettings, m)
+          ? getTestTasks({
+              garden,
+              log,
+              module: m,
+              graph: updatedGraph,
+              filterNames: testNames,
+              devModeServiceNames,
+              hotReloadServiceNames,
+            })
+          : []
       )
     )
-  }
+  )
 
   return tasks
+}
+
+export function applyTaskSettings(graph: ConfigGraph, taskSettings: CommandTaskSettings) {
+  const hotReloadServiceNames = getHotReloadServiceNames(taskSettings.hotReloadServiceNames, graph)
+  // const hotReloadServiceNames = getHotReloadServiceNames(opts["hot-reload"], graph)
+
+  const serviceNames = taskSettings.deployServiceNames
+  const allServices = graph.getServices()
+  const servicesToDeploy = serviceNames[0] === "*" ? allServices : graph.getServices({ names: serviceNames })
+  // const services = graph.getServices({ names: args.services })
+
+  let devModeServiceNames = getDevModeServiceNames(taskSettings.devModeServiceNames, graph)
+
+  devModeServiceNames = servicesToDeploy
+    .map((s) => s.name)
+    // Since dev mode is implicit when using this command, we consider explicitly enabling hot reloading to
+    // take precedence over dev mode.
+    .filter((name) => devModeServiceNames.includes(name) && !hotReloadServiceNames.includes(name))
+  const testNames = isEmpty(taskSettings.testConfigNames) ? undefined : taskSettings.testConfigNames
+
+  return { servicesToDeploy, hotReloadServiceNames, devModeServiceNames, testNames }
+}
+
+function moduleShouldBeTested(taskSettings: CommandTaskSettings, module: GardenModule): boolean {
+  const testModuleNames = taskSettings.testModuleNames
+  return testModuleNames[0] === "*" || !!testModuleNames.find((n) => n === module.name)
 }
 
 function getGreetingTime() {

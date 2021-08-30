@@ -168,8 +168,8 @@ export class DeployCommand extends Command<Args, Opts> {
     }
 
     const modules = Array.from(new Set(services.map((s) => s.module)))
-    const devModeServiceNames = await getDevModeServiceNames(opts["dev-mode"], initGraph)
-    const hotReloadServiceNames = await getHotReloadServiceNames(opts["hot-reload"], initGraph)
+    const devModeServiceNames = getDevModeServiceNames(opts["dev-mode"], initGraph)
+    const hotReloadServiceNames = getHotReloadServiceNames(opts["hot-reload"], initGraph)
 
     let watch = opts.watch
 
@@ -179,7 +179,7 @@ export class DeployCommand extends Command<Args, Opts> {
 
     if (hotReloadServiceNames.length > 0) {
       initGraph.getServices({ names: hotReloadServiceNames }) // validate the existence of these services
-      const errMsg = await validateHotReloadServiceNames(hotReloadServiceNames, initGraph)
+      const errMsg = validateHotReloadServiceNames(hotReloadServiceNames, initGraph)
       if (errMsg) {
         log.error({ msg: errMsg })
         return { result: { builds: {}, deployments: {}, tests: {}, graphResults: {} } }

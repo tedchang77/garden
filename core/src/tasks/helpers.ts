@@ -6,7 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-import { uniqBy } from "lodash"
+import { isEmpty, uniqBy } from "lodash"
 import { DeployTask } from "./deploy"
 import { Garden } from "../garden"
 import { GardenModule } from "../types/module"
@@ -14,6 +14,33 @@ import { ConfigGraph } from "../config-graph"
 import { LogEntry } from "../logger/log-entry"
 import { BaseTask } from "./base"
 import { HotReloadTask } from "./hot-reload"
+import { CommandTaskSettings } from "../commands/base"
+
+export async function getInitialTasks({
+  garden,
+  log,
+  graph,
+  module,
+  taskSettings,
+}: {
+  garden: Garden
+  log: LogEntry
+  graph: ConfigGraph
+  module: GardenModule
+  taskSettings: CommandTaskSettings
+}): Promise<BaseTask[]> {
+  // build command:  modules: [...], services: [],    tests: []
+  // deploy command: modules: [],    services: [...], tests: []
+  // dev command:    modules: [],    services: [...], tests: [...]
+  // test command:   modules: [],    services: [],    tests: [...]
+
+  // Get module names, service names and hot reload & dev mode service names from graph + taskSettings
+
+  // Build tasks for requested modules
+  // Deploy tasks for requested services
+  // Test tasks for requested tests
+  return []
+}
 
 /**
  * Helper used by the `garden dev` and `garden deploy --watch` commands, to get all the tasks that should be

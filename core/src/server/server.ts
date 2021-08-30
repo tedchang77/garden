@@ -235,20 +235,22 @@ export class GardenServer {
      * The API matches that of the Garden Enterprise /events endpoint.
      */
     http.post("/events", async (ctx) => {
-      const authHeader = ctx.header[authTokenHeader]
+      // const authHeader = ctx.header[authTokenHeader]
 
-      if (authHeader !== this.authKey) {
-        ctx.status = 401
-        return
-      }
+      // if (authHeader !== this.authKey) {
+      //   ctx.status = 401
+      //   return
+      // }
 
       // TODO: validate the input
 
       const batch = ctx.request.body as ApiEventBatch
-      this.debugLog.debug(`Received ${batch.events.length} events from session ${batch.sessionId}`)
+      this.debugLog.debug(`Received ${JSON.stringify(batch.events, null, 2)} events from session ${batch.sessionId}`)
+      // this.debugLog.debug(`Received ${batch.events.length} events from session ${batch.sessionId}`)
 
       // Pipe the events to the incoming stream, which websocket listeners will then receive
       batch.events.forEach((e) => this.incomingEvents.emit(e.name, e.payload))
+      batch.events.forEach((e) => this.garden!.events.emit(e.name, e.payload))
 
       ctx.status = 200
     })

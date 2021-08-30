@@ -17,7 +17,7 @@ import { GardenService } from "../types/service"
 import { GardenTask } from "../types/task"
 import { GardenTest } from "../types/test"
 
-export async function getDevModeServiceNames(namesFromOpt: string[] | undefined, configGraph: ConfigGraph) {
+export function getDevModeServiceNames(namesFromOpt: string[] | undefined, configGraph: ConfigGraph) {
   const names = namesFromOpt || []
   if (names.includes("*") || (!!namesFromOpt && namesFromOpt.length === 0)) {
     return configGraph.getServices().map((s) => s.name)
@@ -26,7 +26,7 @@ export async function getDevModeServiceNames(namesFromOpt: string[] | undefined,
   }
 }
 
-export async function getHotReloadServiceNames(namesFromOpt: string[] | undefined, configGraph: ConfigGraph) {
+export function getHotReloadServiceNames(namesFromOpt: string[] | undefined, configGraph: ConfigGraph) {
   const names = namesFromOpt || []
   if (names.includes("*")) {
     return configGraph
@@ -42,10 +42,7 @@ export async function getHotReloadServiceNames(namesFromOpt: string[] | undefine
  * Returns an error message string if one or more serviceNames refers to a service that's not configured for
  * hot reloading, or if one or more of serviceNames referes to a non-existent service. Returns null otherwise.
  */
-export async function validateHotReloadServiceNames(
-  serviceNames: string[],
-  configGraph: ConfigGraph
-): Promise<string | null> {
+export function validateHotReloadServiceNames(serviceNames: string[], configGraph: ConfigGraph): string | null {
   const services = configGraph.getServices({ names: serviceNames, includeDisabled: true })
 
   const notHotreloadable = services.filter((s) => !supportsHotReloading(s)).map((s) => s.name)
